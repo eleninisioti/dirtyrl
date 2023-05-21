@@ -284,8 +284,9 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
                     print("time per timestep: ", str((time.time() - start_time)/global_step ))
                     writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
-                    if global_step%1000==0:
-                        keep_track_of_time.append(str((time.time() - start_time)/global_step ))
+                if global_step%1000==0:
+                    keep_track_of_time.append(str((time.time() - start_time)/global_step ))
+                    print(keep_track_of_time)
             # update target network
             if global_step % args.target_network_frequency == 0:
                 q_state = q_state.replace(
