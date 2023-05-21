@@ -277,6 +277,7 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
                     writer.add_scalar("losses/td_loss", jax.device_get(loss), global_step)
                     writer.add_scalar("losses/q_values", jax.device_get(old_val).mean(), global_step)
                     print("SPS:", int(global_step / (time.time() - start_time)))
+                    print("time per timestep: ", str((time.time() - start_time)/global_step ))
                     writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
             # update target network
@@ -284,7 +285,7 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
                 q_state = q_state.replace(
                     target_params=optax.incremental_update(q_state.params, q_state.target_params, args.tau)
                 )
-
+    print("Total time ", str(time.time()-start_time))
     if args.save_model:
         model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
         with open(model_path, "wb") as f:
