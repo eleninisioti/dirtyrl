@@ -224,6 +224,9 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
+
+    keep_track_of_time = []
+
     obs, _ = envs.reset(seed=args.seed)
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
@@ -259,7 +262,6 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
 
-        keep_track_of_time = []
 
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
