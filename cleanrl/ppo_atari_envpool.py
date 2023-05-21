@@ -210,6 +210,7 @@ if __name__ == "__main__":
     next_done = torch.zeros(args.num_envs).to(device)
     num_updates = args.total_timesteps // args.batch_size
 
+
     for update in range(1, num_updates + 1):
         # Annealing the rate if instructed to do so.
         if args.anneal_lr:

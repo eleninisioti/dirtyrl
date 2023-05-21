@@ -259,6 +259,8 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
 
+        keep_track_of_time = []
+
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
             if global_step % args.train_frequency == 0:
@@ -280,11 +282,16 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
                     print("time per timestep: ", str((time.time() - start_time)/global_step ))
                     writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
+                    if global_step%1000==0:
+                        keep_track_of_time.append(str((time.time() - start_time)/global_step ))
             # update target network
             if global_step % args.target_network_frequency == 0:
                 q_state = q_state.replace(
                     target_params=optax.incremental_update(q_state.params, q_state.target_params, args.tau)
                 )
+
+    plt.plot(range(len(keep_track_of_time)), keep_track_of_time)
+    plt.savefig("dqn_atari_jax_time.png")
     print("Total time ", str(time.time()-start_time))
     if args.save_model:
         model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
