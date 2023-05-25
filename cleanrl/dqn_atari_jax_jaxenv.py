@@ -1,16 +1,22 @@
-# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/dqn/#dqn_ataripy
+# docs and experiment results can be found at https://docs.cleanrl.dev/rl-algorithms/dqn/#dqn_atari_jaxpy
 import argparse
 import os
 import random
 import time
 from distutils.util import strtobool
 
+os.environ[
+    "XLA_PYTHON_CLIENT_MEM_FRACTION"
+] = "0.7"  # see https://github.com/google/jax/discussions/6332#discussioncomment-1279991
+
+import flax
+import flax.linen as nn
 import gymnasium as gym
+import jax
+import jax.numpy as jnp
 import numpy as np
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-import torch.optim as optim
+import optax
+from flax.training.train_state import TrainState
 from stable_baselines3.common.atari_wrappers import (
     ClipRewardEnv,
     EpisodicLifeEnv,
@@ -29,10 +35,6 @@ def parse_args():
         help="the name of this experiment")
     parser.add_argument("--seed", type=int, default=1,
         help="seed of the experiment")
-    parser.add_argument("--torch-deterministic", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, `torch.backends.cudnn.deterministic=False`")
-    parser.add_argument("--cuda", type=lambda x: bool(strtobool(x)), default=True, nargs="?", const=True,
-        help="if toggled, cuda will be enabled by default")
     parser.add_argument("--track", type=lambda x: bool(strtobool(x)), default=False, nargs="?", const=True,
         help="if toggled, this experiment will be tracked with Weights and Biases")
     parser.add_argument("--wandb-project-name", type=str, default="cleanRL",
@@ -79,7 +81,7 @@ def parse_args():
         help="the frequency of training")
     args = parser.parse_args()
     # fmt: on
-    #assert args.num_envs == 1, "vectorized envs are not supported at the moment"
+    assert args.num_envs == 1, "vectorized envs are not supported at the moment"
 
     return args
 
@@ -110,23 +112,27 @@ def make_env(env_id, seed, idx, capture_video, run_name):
 
 # ALGO LOGIC: initialize agent here:
 class QNetwork(nn.Module):
-    def __init__(self, env):
-        super().__init__()
-        self.network = nn.Sequential(
-            nn.Conv2d(4, 32, 8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, 4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, 3, stride=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(3136, 512),
-            nn.ReLU(),
-            nn.Linear(512, env.single_action_space.n),
-        )
+    action_dim: int
 
-    def forward(self, x):
-        return self.network(x / 255.0)
+    @nn.compact
+    def __call__(self, x):
+        x = jnp.transpose(x, (0, 2, 3, 1))
+        x = x / (255.0)
+        x = nn.Conv(32, kernel_size=(8, 8), strides=(4, 4), padding="VALID")(x)
+        x = nn.relu(x)
+        x = nn.Conv(64, kernel_size=(4, 4), strides=(2, 2), padding="VALID")(x)
+        x = nn.relu(x)
+        x = nn.Conv(64, kernel_size=(3, 3), strides=(1, 1), padding="VALID")(x)
+        x = nn.relu(x)
+        x = x.reshape((x.shape[0], -1))
+        x = nn.Dense(512)(x)
+        x = nn.relu(x)
+        x = nn.Dense(self.action_dim)(x)
+        return x
+
+
+class TrainState(TrainState):
+    target_params: flax.core.FrozenDict
 
 
 def linear_schedule(start_e: float, end_e: float, duration: int, t: int):
@@ -167,10 +173,8 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     # TRY NOT TO MODIFY: seeding
     random.seed(args.seed)
     np.random.seed(args.seed)
-    torch.manual_seed(args.seed)
-    torch.backends.cudnn.deterministic = args.torch_deterministic
-
-    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
+    key = jax.random.PRNGKey(args.seed)
+    key, q_key = jax.random.split(key, 2)
 
     # env setup
     envs = gym.vector.SyncVectorEnv(
@@ -178,22 +182,51 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
     )
     assert isinstance(envs.single_action_space, gym.spaces.Discrete), "only discrete action space is supported"
 
-    q_network = QNetwork(envs).to(device)
-    optimizer = optim.Adam(q_network.parameters(), lr=args.learning_rate)
-    target_network = QNetwork(envs).to(device)
-    target_network.load_state_dict(q_network.state_dict())
+    obs, _ = envs.reset(seed=args.seed)
+
+    q_network = QNetwork(action_dim=envs.single_action_space.n)
+
+    q_state = TrainState.create(
+        apply_fn=q_network.apply,
+        params=q_network.init(q_key, obs),
+        target_params=q_network.init(q_key, obs),
+        tx=optax.adam(learning_rate=args.learning_rate),
+    )
+
+    q_network.apply = jax.jit(q_network.apply)
+    # This step is not necessary as init called on same observation and key will always lead to same initializations
+    q_state = q_state.replace(target_params=optax.incremental_update(q_state.params, q_state.target_params, 1))
 
     rb = ReplayBuffer(
         args.buffer_size,
         envs.single_observation_space,
         envs.single_action_space,
-        device,
+        "cpu",
         optimize_memory_usage=True,
         handle_timeout_termination=False,
     )
+
+    @jax.jit
+    def update(q_state, observations, actions, next_observations, rewards, dones):
+        q_next_target = q_network.apply(q_state.target_params, next_observations)  # (batch_size, num_actions)
+        q_next_target = jnp.max(q_next_target, axis=-1)  # (batch_size,)
+        next_q_value = rewards + (1 - dones) * args.gamma * q_next_target
+
+        def mse_loss(params):
+            q_pred = q_network.apply(params, observations)  # (batch_size, num_actions)
+            q_pred = q_pred[jnp.arange(q_pred.shape[0]), actions.squeeze()]  # (batch_size,)
+            return ((q_pred - next_q_value) ** 2).mean(), q_pred
+
+        (loss_value, q_pred), grads = jax.value_and_grad(mse_loss, has_aux=True)(q_state.params)
+        q_state = q_state.apply_gradients(grads=grads)
+        return loss_value, q_pred, q_state
+
     start_time = time.time()
 
     # TRY NOT TO MODIFY: start the game
+
+    keep_track_of_time = []
+
     obs, _ = envs.reset(seed=args.seed)
     for global_step in range(args.total_timesteps):
         # ALGO LOGIC: put action logic here
@@ -201,8 +234,9 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
         if random.random() < epsilon:
             actions = np.array([envs.single_action_space.sample() for _ in range(envs.num_envs)])
         else:
-            q_values = q_network(torch.Tensor(obs).to(device))
-            actions = torch.argmax(q_values, dim=1).cpu().numpy()
+            q_values = q_network.apply(q_state.params, obs)
+            actions = q_values.argmax(axis=-1)
+            actions = jax.device_get(actions)
 
         # TRY NOT TO MODIFY: execute the game and log data.
         next_obs, rewards, terminated, truncated, infos = envs.step(actions)
@@ -228,39 +262,47 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
         # TRY NOT TO MODIFY: CRUCIAL step easy to overlook
         obs = next_obs
 
+
         # ALGO LOGIC: training.
         if global_step > args.learning_starts:
             if global_step % args.train_frequency == 0:
                 data = rb.sample(args.batch_size)
-                with torch.no_grad():
-                    target_max, _ = target_network(data.next_observations).max(dim=1)
-                    td_target = data.rewards.flatten() + args.gamma * target_max * (1 - data.dones.flatten())
-                old_val = q_network(data.observations).gather(1, data.actions).squeeze()
-                loss = F.mse_loss(td_target, old_val)
+                # perform a gradient-descent step
+                loss, old_val, q_state = update(
+                    q_state,
+                    data.observations.numpy(),
+                    data.actions.numpy(),
+                    data.next_observations.numpy(),
+                    data.rewards.flatten().numpy(),
+                    data.dones.flatten().numpy(),
+                )
 
                 if global_step % 100 == 0:
-                    writer.add_scalar("losses/td_loss", loss, global_step)
-                    writer.add_scalar("losses/q_values", old_val.mean().item(), global_step)
+                    writer.add_scalar("losses/td_loss", jax.device_get(loss), global_step)
+                    writer.add_scalar("losses/q_values", jax.device_get(old_val).mean(), global_step)
                     print("SPS:", int(global_step / (time.time() - start_time)))
+                    print("time per timestep: ", str((time.time() - start_time)/global_step ))
                     writer.add_scalar("charts/SPS", int(global_step / (time.time() - start_time)), global_step)
 
-                # optimize the model
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
+                if global_step%1000==0:
+                    keep_track_of_time.append(str((time.time() - start_time)/global_step ))
+                    print(keep_track_of_time)
 
             # update target network
             if global_step % args.target_network_frequency == 0:
-                for target_network_param, q_network_param in zip(target_network.parameters(), q_network.parameters()):
-                    target_network_param.data.copy_(
-                        args.tau * q_network_param.data + (1.0 - args.tau) * target_network_param.data
-                    )
+                q_state = q_state.replace(
+                    target_params=optax.incremental_update(q_state.params, q_state.target_params, args.tau)
+                )
 
+    plt.plot(range(len(keep_track_of_time)), keep_track_of_time)
+    plt.savefig("dqn_atari_jax_time.png")
+    print("Total time ", str(time.time()-start_time))
     if args.save_model:
         model_path = f"runs/{run_name}/{args.exp_name}.cleanrl_model"
-        torch.save(q_network.state_dict(), model_path)
+        with open(model_path, "wb") as f:
+            f.write(flax.serialization.to_bytes(q_state.params))
         print(f"model saved to {model_path}")
-        from cleanrl_utils.evals.dqn_eval import evaluate
+        from cleanrl_utils.evals.dqn_jax_eval import evaluate
 
         episodic_returns = evaluate(
             model_path,
@@ -269,7 +311,6 @@ poetry run pip install "stable_baselines3==2.0.0a1" "gymnasium[atari,accept-rom-
             eval_episodes=10,
             run_name=f"{run_name}-eval",
             Model=QNetwork,
-            device=device,
             epsilon=0.05,
         )
         for idx, episodic_return in enumerate(episodic_returns):
