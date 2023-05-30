@@ -917,7 +917,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--exp-name", type=str, default=os.path.basename(__file__).rstrip(".py"), help="the name of this experiment"
     )
-    parser.add_argument("--env-id", type=str, default="BreakoutNoFrameskip-v4", help="the id of the environment")
+    parser.add_argument("--env-id", type=str, default="BeamRiderNoFrameskip-v4", help="the id of the environment")
     parser.add_argument("--learning-rate", type=float, default=1e-4, help="the learning rate of the optimizer")
     parser.add_argument("--seed", type=int, default=2, help="seed of the experiment")
     parser.add_argument("--total-timesteps", type=int, default=10000000, help="total timesteps of the experiments")
@@ -957,7 +957,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb-entity", type=str, default=None, help="the entity (team) of wandb's project")
 
     # Algorithm specific arguments
-    parser.add_argument("--num-actors", type=int, default=360, help="the replay memory buffer size")
+    parser.add_argument("--num-actors", type=int, default=64, help="the replay memory buffer size")
     parser.add_argument("--num-data-processors", type=int, default=2, help="the replay memory buffer size")
     parser.add_argument("--actor-buffer-size", type=int, default=50, help="the replay memory buffer size")
     parser.add_argument("--buffer-size", type=int, default=2000000, help="the replay memory buffer size")
