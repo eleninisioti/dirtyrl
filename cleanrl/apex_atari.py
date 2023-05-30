@@ -957,7 +957,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb-entity", type=str, default=None, help="the entity (team) of wandb's project")
 
     # Algorithm specific arguments
-    parser.add_argument("--num-actors", type=int, default=64, help="the replay memory buffer size")
+    parser.add_argument("--num-actors", type=int, default=128, help="the replay memory buffer size")
     parser.add_argument("--num-data-processors", type=int, default=2, help="the replay memory buffer size")
     parser.add_argument("--actor-buffer-size", type=int, default=50, help="the replay memory buffer size")
     parser.add_argument("--buffer-size", type=int, default=2000000, help="the replay memory buffer size")

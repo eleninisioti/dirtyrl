@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH -J beamrdiderapex
-#SBATCH --nodes=16
+#SBATCH --cpus-per-task 64
 #SBATCH -t 200:00:00
 #SBATCH --ntasks-per-node=10
 #SBATCH --output=/scratch/enisioti/cleanrl_log/jz_logs/%j.out
