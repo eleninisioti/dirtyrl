@@ -1093,6 +1093,8 @@ if __name__ == "__main__":
 
     import timeit
 
+    #myfile = open('rewards_log.txt', 'w', buffering=1)
+
     timer = timeit.default_timer
     existing_video_files = []
     try:
@@ -1103,11 +1105,16 @@ if __name__ == "__main__":
             if m[0] == "charts/episodic_return":
                 r, l = m[1], m[2]
                 writer.add_scalar("charts/episodic_return", r, global_step)
+                #myfile.write(str(r) + " ," +  str(global_step) + "\n")
                 #writer.add_scalar("charts/stats_queue_size", stats_queue.qsize(), global_step)
                 #writer.add_scalar("charts/rollouts_queue_size", rollouts_queue.qsize(), global_step)
                 #writer.add_scalar("charts/data_process_queue_size", data_process_queue.qsize(), global_step)
                 writer.add_scalar("charts/SPS", (global_step.item() - start_global_step) / (timer() - start_time), global_step)
-                print("SPS: ", (global_step.item() - start_global_step) / (timer() - start_time))
+                print("Return: ", r)
+                print("Step: ", global_step)
+
+
+                #print("SPS: ", (global_step.item() - start_global_step) / (timer() - start_time))
             else:
                 # print(m[0], m[1], global_step)
                 writer.add_scalar(m[0], m[1], global_step)
@@ -1122,6 +1129,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     finally:
+        myfile.close()
         learner.terminate()
         learner.join(timeout=1)
         for actor in actor_processes:
