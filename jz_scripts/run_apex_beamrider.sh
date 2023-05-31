@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH -J beamrdiderapex
+#SBATCH -J cleanrlapex
 #SBATCH -t 24:00:00
 #SBATCH --cpus-per-task 64
 #SBATCH --output=/scratch/enisioti/cleanrl_log/jz_logs/%j.out
