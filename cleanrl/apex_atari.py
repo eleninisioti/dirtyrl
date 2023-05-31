@@ -30,7 +30,7 @@ class NoopResetEnv(gym.Wrapper):
         assert noops > 0
         obs = None
         for _ in range(noops):
-            obs, _, done, _,  = self.env.step(self.noop_action)
+            obs, _, done, _  = self.env.step(self.noop_action)
             if done:
                 obs = self.env.reset(**kwargs)
         return obs
@@ -957,7 +957,7 @@ if __name__ == "__main__":
     parser.add_argument("--wandb-entity", type=str, default=None, help="the entity (team) of wandb's project")
 
     # Algorithm specific arguments
-    parser.add_argument("--num-actors", type=int, default=128, help="the replay memory buffer size")
+    parser.add_argument("--num-actors", type=int, default=2, help="the replay memory buffer size")
     parser.add_argument("--num-data-processors", type=int, default=2, help="the replay memory buffer size")
     parser.add_argument("--actor-buffer-size", type=int, default=50, help="the replay memory buffer size")
     parser.add_argument("--buffer-size", type=int, default=2000000, help="the replay memory buffer size")
@@ -1129,7 +1129,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         pass
     finally:
-        myfile.close()
         learner.terminate()
         learner.join(timeout=1)
         for actor in actor_processes:
